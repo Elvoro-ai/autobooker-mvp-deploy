@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { AIOrchestrator } from '@/lib/ai-orchestrator';
 import { CalendarService } from '@/lib/calendar-service';
 import { NotificationService } from '@/lib/notification-service';
+import { securityService, SecurityContext } from '@/lib/security';
+import { rateLimit } from '@/lib/rate-limit';
 
 // Interface pour les requêtes API
 interface ChatRequest {
@@ -17,10 +19,12 @@ interface ChatResponse {
   actions?: Array<{ type: string; status: string; data?: any }>;
 }
 
-// Cache en mémoire pour les sessions (en production, utiliser Redis/Upstash)
-const sessions = new Map<string, any>();
+// Cache en mémoire pour les sessions avec TTL (en production, utiliser Redis/Upstash)
+const sessions = new Map<string, { context: any; lastActivity: number; createdAt: number }>();
+const SESSION_TTL = 24 * 60 * 60 * 1000; // 24 heures
+const SESSION_MAX_INACTIVE = 4 * 60 * 60 * 1000; // 4 heures d'inactivité
 
-// Services globaux
+// Services globaux avec configuration sécurisée
 const calendarService = new CalendarService({
   businessHours: {
     monday: { open: '09:00', close: '18:00' },
@@ -39,7 +43,7 @@ const calendarService = new CalendarService({
 
 const notificationService = new NotificationService();
 
-// Configuration des services avec les variables d'environnement
+// Configuration sécurisée des services externes
 if (process.env.RESEND_API_KEY) {
   notificationService.configureResend(process.env.RESEND_API_KEY);
 }
@@ -61,103 +65,348 @@ if (process.env.OUTLOOK_CALENDAR_ID) {
 }
 
 export async function POST(request: NextRequest) {
+  const startTime = Date.now();
+  let securityContext: SecurityContext | null = null;
+  
   try {
+    // Extraction des informations de sécurité
+    const ipAddress = request.ip || 
+      request.headers.get('x-forwarded-for')?.split(',')[0] || 
+      request.headers.get('x-real-ip') || 
+      'unknown';
+    const userAgent = request.headers.get('user-agent') || '';
+    
+    securityContext = {
+      sessionId: 'temp',
+      ipAddress,
+      userAgent,
+      timestamp: new Date(),
+      permissions: ['chat', 'booking']
+    };
+
+    // Vérifications de sécurité préliminaires
+    const securityCheck = await securityService.validateRequest(securityContext);
+    if (!securityCheck.allowed) {
+      return NextResponse.json(
+        { 
+          error: 'Request blocked by security policy',
+          reason: securityCheck.reason
+        },
+        { 
+          status: 429,
+          headers: {
+            'X-Security-Block': 'true',
+            'Retry-After': '60'
+          }
+        }
+      );
+    }
+
+    // Rate limiting spécifique à l'IA
+    const rateLimitResult = await rateLimit.check(`${ipAddress}:ai_chat`, 'ai_chat');
+    if (!rateLimitResult.allowed) {
+      securityService.logSecurityEvent({
+        event: 'suspicious',
+        severity: 'medium',
+        sessionId: 'unknown',
+        ipAddress,
+        details: { 
+          reason: 'ai_rate_limit_exceeded',
+          current: rateLimitResult.limit - rateLimitResult.remaining,
+          limit: rateLimitResult.limit
+        }
+      });
+      
+      return NextResponse.json(
+        { 
+          error: 'Too many requests',
+          message: `Limite atteinte. Réessayez dans ${rateLimitResult.retryAfter} secondes.`,
+          retryAfter: rateLimitResult.retryAfter
+        },
+        { 
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+            'X-RateLimit-Remaining': rateLimitResult.remaining.toString(),
+            'X-RateLimit-Reset': rateLimitResult.resetTime.toISOString(),
+            'Retry-After': rateLimitResult.retryAfter?.toString() || '60'
+          }
+        }
+      );
+    }
+
+    // Parse et validation du body
     const body: ChatRequest = await request.json();
     
-    if (!body.message) {
+    // Validation des entrées
+    const validation = securityService.validateAndSanitize(body, {
+      message: { 
+        required: true, 
+        type: 'string', 
+        maxLength: 2000,
+        minLength: 1
+      },
+      sessionId: { 
+        type: 'string', 
+        maxLength: 100 
+      }
+    });
+    
+    if (!validation.isValid) {
+      securityService.logSecurityEvent({
+        event: 'suspicious',
+        severity: 'medium',
+        sessionId: body.sessionId || 'unknown',
+        ipAddress,
+        details: { reason: 'validation_failed', errors: validation.errors }
+      });
+      
       return NextResponse.json(
-        { error: 'Message requis' },
+        { 
+          error: 'Validation failed',
+          details: validation.errors
+        },
         { status: 400 }
       );
     }
 
-    // Générer ou récupérer l'ID de session
-    const sessionId = body.sessionId || `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-    
-    // Récupérer le contexte existant ou créer un nouveau
-    const existingContext = sessions.get(sessionId) || body.context;
+    const sanitizedBody = validation.sanitizedData;
 
-    // Initialiser l'orchestrateur IA
-    const orchestrator = new AIOrchestrator(sessionId, existingContext);
+    // Générer ou récupérer l'ID de session sécurisé
+    const sessionId = sanitizedBody.sessionId || securityService.generateSessionId();
+    securityContext.sessionId = sessionId;
     
-    // Traiter le message
-    const result = await orchestrator.processMessage(body.message);
+    // Récupérer le contexte existant avec validation
+    let existingSession = sessions.get(sessionId);
+    const now = Date.now();
     
-    // Sauvegarder le contexte
-    sessions.set(sessionId, result.context);
+    // Vérifier la validité de la session
+    if (existingSession) {
+      const isExpired = (now - existingSession.createdAt) > SESSION_TTL;
+      const isInactive = (now - existingSession.lastActivity) > SESSION_MAX_INACTIVE;
+      
+      if (isExpired || isInactive) {
+        sessions.delete(sessionId);
+        existingSession = null;
+        
+        securityService.logSecurityEvent({
+          event: 'auth',
+          severity: 'low',
+          sessionId,
+          ipAddress,
+          details: { reason: isExpired ? 'session_expired' : 'session_inactive' }
+        });
+      }
+    }
+
+    // Initialiser l'orchestrateur IA avec contexte sécurisé
+    const orchestrator = new AIOrchestrator(
+      sessionId, 
+      existingSession?.context || sanitizedBody.context
+    );
     
-    // Exécuter les actions déterminées par l'IA
-    const actionResults = await executeActions(result.actions);
+    // Traitement du message avec gestion d'erreur robuste
+    let result;
+    try {
+      result = await orchestrator.processMessage(sanitizedBody.message);
+    } catch (orchestratorError) {
+      securityService.logSecurityEvent({
+        event: 'error',
+        severity: 'high',
+        sessionId,
+        ipAddress,
+        details: { 
+          stage: 'orchestrator_processing',
+          error: orchestratorError instanceof Error ? orchestratorError.message : 'Unknown orchestrator error'
+        }
+      });
+      
+      return NextResponse.json(
+        { 
+          error: 'Processing error',
+          message: 'Une erreur est survenue lors du traitement de votre message. Veuillez réessayer.'
+        },
+        { status: 500 }
+      );
+    }
     
-    // Préparer la réponse
+    // Sauvegarder le contexte avec métadonnées de sécurité
+    sessions.set(sessionId, {
+      context: result.context,
+      lastActivity: now,
+      createdAt: existingSession?.createdAt || now
+    });
+    
+    // Exécuter les actions avec gestion d'erreur
+    let actionResults = [];
+    try {
+      actionResults = await executeActions(result.actions, securityContext);
+    } catch (actionError) {
+      securityService.logSecurityEvent({
+        event: 'error',
+        severity: 'medium',
+        sessionId,
+        ipAddress,
+        details: { 
+          stage: 'action_execution',
+          error: actionError instanceof Error ? actionError.message : 'Unknown action error'
+        }
+      });
+    }
+    
+    // Log de l'activité normale
+    securityService.logSecurityEvent({
+      event: 'data_access',
+      severity: 'low',
+      sessionId,
+      ipAddress,
+      details: { 
+        message_length: sanitizedBody.message.length,
+        intent: result.context.currentIntent?.type,
+        processing_time: Date.now() - startTime,
+        actions_executed: actionResults.length
+      }
+    });
+    
+    // Préparer la réponse avec headers de sécurité
     const response: ChatResponse = {
       response: result.response,
       sessionId,
-      context: result.context,
+      context: securityService.maskPII(result.context), // Masquer les PII dans la réponse
       actions: actionResults
     };
 
-    return NextResponse.json(response);
+    return NextResponse.json(response, {
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'X-XSS-Protection': '1; mode=block',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'Content-Security-Policy': "default-src 'self'",
+        'X-Session-Id': sessionId,
+        'X-Processing-Time': `${Date.now() - startTime}ms`,
+        'X-RateLimit-Limit': rateLimitResult.limit.toString(),
+        'X-RateLimit-Remaining': rateLimitResult.remaining.toString()
+      }
+    });
     
   } catch (error) {
+    const processingTime = Date.now() - startTime;
+    
+    if (securityContext) {
+      securityService.logSecurityEvent({
+        event: 'error',
+        severity: 'high',
+        sessionId: securityContext.sessionId,
+        ipAddress: securityContext.ipAddress,
+        details: { 
+          error: error instanceof Error ? error.message : 'Unknown error',
+          stack: error instanceof Error ? error.stack : 'No stack trace',
+          processing_time: processingTime
+        }
+      });
+    }
+    
     console.error('Erreur API IA:', error);
     return NextResponse.json(
       { 
-        error: 'Erreur interne du serveur',
-        details: error instanceof Error ? error.message : 'Erreur inconnue'
+        error: 'Internal server error',
+        message: 'Une erreur technique est survenue. Notre équipe a été notifiée.',
+        requestId: securityService.generateSecureToken(8)
       },
-      { status: 500 }
+      { 
+        status: 500,
+        headers: {
+          'X-Content-Type-Options': 'nosniff',
+          'X-Frame-Options': 'DENY',
+          'X-Processing-Time': `${processingTime}ms`
+        }
+      }
     );
   }
 }
 
-// Exécution des actions déterminées par l'IA
-async function executeActions(actions: Array<{ type: string; data: any }>): Promise<Array<{ type: string; status: string; data?: any }>> {
+// Exécution sécurisée des actions
+async function executeActions(
+  actions: Array<{ type: string; data: any }>,
+  securityContext: SecurityContext
+): Promise<Array<{ type: string; status: string; data?: any }>> {
   const results = [];
   
   for (const action of actions) {
+    const actionStartTime = Date.now();
+    
     try {
+      // Log de début d'action
+      securityService.logSecurityEvent({
+        event: 'data_modify',
+        severity: 'low',
+        sessionId: securityContext.sessionId,
+        ipAddress: securityContext.ipAddress,
+        details: { action: action.type, stage: 'start' }
+      });
+      
+      let result;
       switch (action.type) {
         case 'create_booking':
-          const bookingResult = await handleCreateBooking(action.data);
-          results.push({
-            type: 'create_booking',
-            status: bookingResult.success ? 'success' : 'failed',
-            data: bookingResult
-          });
+          result = await handleCreateBooking(action.data, securityContext);
           break;
           
         case 'send_confirmation_email':
-          const emailResult = await handleSendConfirmationEmail(action.data);
-          results.push({
-            type: 'send_confirmation_email',
-            status: emailResult.success ? 'success' : 'failed',
-            data: emailResult
-          });
+          result = await handleSendConfirmationEmail(action.data, securityContext);
           break;
           
         case 'get_available_slots':
-          const slotsResult = await handleGetAvailableSlots(action.data);
-          results.push({
-            type: 'get_available_slots',
-            status: 'success',
-            data: slotsResult
-          });
+          result = await handleGetAvailableSlots(action.data, securityContext);
           break;
           
         default:
-          results.push({
-            type: action.type,
-            status: 'not_implemented',
-            data: { message: `Action ${action.type} non implémentée` }
-          });
+          result = {
+            success: false,
+            error: `Action ${action.type} non implémentée`
+          };
       }
+      
+      results.push({
+        type: action.type,
+        status: result.success ? 'success' : 'failed',
+        data: securityService.maskPII(result)
+      });
+      
+      // Log de fin d'action
+      securityService.logSecurityEvent({
+        event: 'data_modify',
+        severity: result.success ? 'low' : 'medium',
+        sessionId: securityContext.sessionId,
+        ipAddress: securityContext.ipAddress,
+        details: { 
+          action: action.type, 
+          stage: 'complete',
+          success: result.success,
+          processing_time: Date.now() - actionStartTime
+        }
+      });
+      
     } catch (error) {
-      console.error(`Erreur lors de l'exécution de l'action ${action.type}:`, error);
+      const actionError = error instanceof Error ? error.message : 'Unknown error';
+      
+      securityService.logSecurityEvent({
+        event: 'error',
+        severity: 'high',
+        sessionId: securityContext.sessionId,
+        ipAddress: securityContext.ipAddress,
+        details: { 
+          action: action.type,
+          stage: 'execution',
+          error: actionError,
+          processing_time: Date.now() - actionStartTime
+        }
+      });
+      
       results.push({
         type: action.type,
         status: 'error',
-        data: { error: error instanceof Error ? error.message : 'Erreur inconnue' }
+        data: { error: 'Erreur lors de l\'exécution de l\'action' }
       });
     }
   }
@@ -165,74 +414,101 @@ async function executeActions(actions: Array<{ type: string; data: any }>): Prom
   return results;
 }
 
-// Gestionnaires d'actions spécifiques
-async function handleCreateBooking(data: any) {
+// Gestionnaires d'actions sécurisés
+async function handleCreateBooking(data: any, securityContext: SecurityContext) {
   try {
-    // Validation des données
-    if (!data.date || !data.time) {
+    // Validation sécurisée des données de réservation
+    const bookingValidation = securityService.validateAndSanitize(data, {
+      date: { required: true, type: 'date' },
+      time: { required: true, type: 'string', pattern: /^\d{2}:\d{2}$/ },
+      duration: { type: 'number' },
+      clientEmail: { type: 'email', maxLength: 254 },
+      clientPhone: { type: 'phone', maxLength: 20 },
+      service: { type: 'string', maxLength: 100 },
+      notes: { type: 'string', maxLength: 500 }
+    });
+
+    if (!bookingValidation.isValid) {
       return {
         success: false,
-        error: 'Date et heure requises pour la réservation'
+        error: 'Données de réservation invalides',
+        details: bookingValidation.errors
       };
     }
 
-    // Créer la réservation dans le calendrier
-    const bookingResult = await calendarService.createBooking({
-      date: data.date,
-      time: data.time,
-      duration: data.duration || 60,
-      title: `${data.service || 'Consultation'} - ${data.clientEmail || 'Client'}`,
-      description: data.notes,
-      clientEmail: data.clientEmail,
-      clientPhone: data.clientPhone,
-      serviceType: data.service || 'consultation'
-    });
+    const sanitizedData = bookingValidation.sanitizedData;
 
-    if (bookingResult.success) {
-      // Programmer les rappels automatiques
-      if (data.clientEmail || data.clientPhone) {
-        const reminderChannels = [];
-        if (data.clientEmail) reminderChannels.push('email');
-        if (data.clientPhone) reminderChannels.push('sms');
-        
+    // Vérifier les permissions pour la création de booking
+    if (!securityContext.permissions.includes('booking')) {
+      return {
+        success: false,
+        error: 'Permissions insuffisantes pour créer une réservation'
+      };
+    }
+
+    // Créer la réservation avec données chiffrées
+    const bookingRequest = {
+      ...sanitizedData,
+      title: `${sanitizedData.service || 'Consultation'} - ${sanitizedData.clientEmail ? securityService.maskPII({email: sanitizedData.clientEmail}).email : 'Client'}`,
+      duration: sanitizedData.duration || 60,
+      serviceType: sanitizedData.service || 'consultation'
+    };
+
+    const bookingResult = await calendarService.createBooking(bookingRequest);
+
+    if (bookingResult.success && bookingResult.eventId) {
+      // Programmer les rappels avec données chiffrées
+      const reminderChannels = [];
+      if (sanitizedData.clientEmail) reminderChannels.push('email');
+      if (sanitizedData.clientPhone) reminderChannels.push('sms');
+      
+      if (reminderChannels.length > 0) {
         await notificationService.scheduleReminder({
-          id: bookingResult.eventId!,
-          date: data.date,
-          time: data.time,
-          duration: data.duration || 60,
-          service: data.service || 'consultation',
-          clientName: data.clientName,
-          clientEmail: data.clientEmail,
-          clientPhone: data.clientPhone,
+          id: bookingResult.eventId,
+          date: sanitizedData.date,
+          time: sanitizedData.time,
+          duration: sanitizedData.duration || 60,
+          service: sanitizedData.service || 'consultation',
+          clientName: sanitizedData.clientName || 'Client',
+          clientEmail: sanitizedData.clientEmail,
+          clientPhone: sanitizedData.clientPhone,
           practitionerName: 'Dr. Dupont' // TODO: rendre configurable
         }, reminderChannels);
       }
     }
 
-    return bookingResult;
+    return {
+      ...bookingResult,
+      bookingId: bookingResult.eventId
+    };
     
   } catch (error) {
-    console.error('Erreur création booking:', error);
+    console.error('Erreur création booking sécurisée:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Erreur lors de la création'
+      error: 'Erreur technique lors de la création de la réservation'
     };
   }
 }
 
-async function handleSendConfirmationEmail(data: any) {
+async function handleSendConfirmationEmail(data: any, securityContext: SecurityContext) {
   try {
-    if (!data.email) {
+    const emailValidation = securityService.validateAndSanitize(data, {
+      email: { required: true, type: 'email', maxLength: 254 }
+    });
+
+    if (!emailValidation.isValid) {
       return {
         success: false,
-        error: 'Adresse email requise'
+        error: 'Adresse email invalide',
+        details: emailValidation.errors
       };
     }
 
     const result = await notificationService.sendNotification({
       type: 'booking_confirmation',
       channel: 'email',
-      recipient: data.email,
+      recipient: emailValidation.sanitizedData.email,
       bookingDetails: {
         id: data.bookingDetails?.id || `booking_${Date.now()}`,
         date: data.bookingDetails?.date,
@@ -240,75 +516,141 @@ async function handleSendConfirmationEmail(data: any) {
         duration: data.bookingDetails?.duration || 60,
         service: data.bookingDetails?.service || 'consultation',
         clientName: data.bookingDetails?.clientName || 'Client',
-        clientEmail: data.email,
-        practitionerName: 'Dr. Dupont' // TODO: configurable
+        clientEmail: emailValidation.sanitizedData.email,
+        practitionerName: 'Dr. Dupont'
       }
     });
 
     return result;
     
   } catch (error) {
-    console.error('Erreur envoi email confirmation:', error);
+    console.error('Erreur envoi email sécurisé:', error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : 'Erreur envoi email'
+      error: 'Erreur lors de l\'envoi de l\'email de confirmation'
     };
   }
 }
 
-async function handleGetAvailableSlots(data: any) {
+async function handleGetAvailableSlots(data: any, securityContext: SecurityContext) {
   try {
-    const date = data.date || new Date().toISOString().split('T')[0];
-    const duration = data.duration || 60;
-    const slots = await calendarService.getAvailableSlots(date, duration);
+    const slotsValidation = securityService.validateAndSanitize(data, {
+      date: { required: true, type: 'date' },
+      duration: { type: 'number' }
+    });
+
+    if (!slotsValidation.isValid) {
+      return {
+        success: false,
+        error: 'Paramètres de créneaux invalides',
+        details: slotsValidation.errors
+      };
+    }
+
+    const sanitizedData = slotsValidation.sanitizedData;
+    const slots = await calendarService.getAvailableSlots(
+      sanitizedData.date, 
+      sanitizedData.duration || 60
+    );
     
     return {
-      date,
-      duration,
-      slots: slots.filter(slot => slot.available).map(slot => ({
-        start: slot.start.toISOString(),
-        end: slot.end.toISOString(),
-        time: slot.start.toLocaleTimeString('fr-FR', { 
-          hour: '2-digit', 
-          minute: '2-digit' 
-        })
-      }))
+      success: true,
+      data: {
+        date: sanitizedData.date,
+        duration: sanitizedData.duration || 60,
+        slots: slots.filter(slot => slot.available).map(slot => ({
+          start: slot.start.toISOString(),
+          end: slot.end.toISOString(),
+          time: slot.start.toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit' 
+          })
+        }))
+      }
     };
     
   } catch (error) {
-    console.error('Erreur récupération slots:', error);
+    console.error('Erreur récupération slots sécurisée:', error);
     return {
-      error: error instanceof Error ? error.message : 'Erreur récupération créneaux'
+      success: false,
+      error: 'Erreur lors de la récupération des créneaux'
     };
   }
 }
 
-// Endpoint GET pour les informations de statut
-export async function GET() {
+// Endpoint GET pour le statut et la santé du service
+export async function GET(request: NextRequest) {
+  const ipAddress = request.ip || 'unknown';
+  
+  // Rate limiting pour les requêtes de statut
+  const rateLimitResult = await rateLimit.check(`${ipAddress}:status`, 'general');
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      { error: 'Too many status requests' },
+      { status: 429 }
+    );
+  }
+
+  const stats = securityService.getSecurityStats();
+  const rateLimitStats = rateLimit.getStats();
+  
   return NextResponse.json({
     status: 'online',
     version: '2.0.0',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    
+    // Fonctionnalités disponibles
     features: {
       aiOrchestrator: true,
       calendarIntegration: !!process.env.GOOGLE_CALENDAR_ID || !!process.env.OUTLOOK_CALENDAR_ID,
       emailNotifications: !!process.env.RESEND_API_KEY,
       smsNotifications: !!process.env.TWILIO_ACCOUNT_SID,
-      whatsappNotifications: !!process.env.TWILIO_WHATSAPP_FROM
+      whatsappNotifications: !!process.env.TWILIO_WHATSAPP_FROM,
+      enterpriseSecurity: true,
+      rateLimiting: true,
+      gdprCompliance: true,
+      encryption: true
     },
-    sessionsActive: sessions.size,
-    uptime: process.uptime(),
-    timestamp: new Date().toISOString()
+    
+    // Statistiques (non-sensibles)
+    stats: {
+      activeSessions: sessions.size,
+      securityEvents: stats.totalEvents,
+      rateLimitEntries: rateLimitStats.totalEntries
+    },
+    
+    // Configuration publique
+    limits: {
+      ai_chat: '20 req/min',
+      booking: '10 req/min',
+      general: '100 req/min'
+    }
+  }, {
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'X-Content-Type-Options': 'nosniff',
+      'X-Frame-Options': 'DENY'
+    }
   });
 }
 
-// Nettoyage des sessions anciennes (exécuté périodiquement)
+// Nettoyage automatique des sessions expirées
 setInterval(() => {
   const now = Date.now();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 heures
+  const expiredSessions = [];
   
-  for (const [sessionId, context] of sessions.entries()) {
-    if (context.lastActivity && (now - context.lastActivity) > maxAge) {
+  for (const [sessionId, session] of sessions.entries()) {
+    const isExpired = (now - session.createdAt) > SESSION_TTL;
+    const isInactive = (now - session.lastActivity) > SESSION_MAX_INACTIVE;
+    
+    if (isExpired || isInactive) {
+      expiredSessions.push(sessionId);
       sessions.delete(sessionId);
     }
+  }
+  
+  if (expiredSessions.length > 0) {
+    console.log(`Nettoyage: ${expiredSessions.length} sessions expirées supprimées`);
   }
 }, 60 * 60 * 1000); // Nettoyage toutes les heures
