@@ -395,13 +395,6 @@ function LiveAIChatInner() {
       </div>
     </section>
   );
-
-  function handleKeyPress(e: React.KeyboardEvent) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  }
 }
 
 export function LiveAIChat() {
