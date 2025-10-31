@@ -1,112 +1,175 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 
 export function AnimatedBackground() {
-  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const mouseRef = useRef({ x: 0, y: 0 });
+  const particlesRef = useRef<Array<{ x: number; y: number; vx: number; vy: number; size: number; opacity: number }>>([]);
 
   useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      setMousePosition({ x: e.clientX, y: e.clientY });
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const resizeCanvas = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
     };
 
-    window.addEventListener("mousemove", handleMouseMove);
-    return () => window.removeEventListener("mousemove", handleMouseMove);
+    const handleMouseMove = (e: MouseEvent) => {
+      mouseRef.current = { x: e.clientX, y: e.clientY };
+    };
+
+    // Initialiser les particules
+    const initParticles = () => {
+      particlesRef.current = [];
+      for (let i = 0; i < 50; i++) {
+        particlesRef.current.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 2,
+          vy: (Math.random() - 0.5) * 2,
+          size: Math.random() * 3 + 1,
+          opacity: Math.random() * 0.5 + 0.3
+        });
+      }
+    };
+
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Gradient de fond
+      const gradient = ctx.createRadialGradient(
+        mouseRef.current.x, mouseRef.current.y, 0,
+        mouseRef.current.x, mouseRef.current.y, 500
+      );
+      gradient.addColorStop(0, 'rgba(59, 130, 246, 0.1)');
+      gradient.addColorStop(0.5, 'rgba(147, 51, 234, 0.05)');
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Animer les particules
+      particlesRef.current.forEach((particle, index) => {
+        // Mouvement
+        particle.x += particle.vx;
+        particle.y += particle.vy;
+
+        // Attraction vers la souris
+        const dx = mouseRef.current.x - particle.x;
+        const dy = mouseRef.current.y - particle.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 200) {
+          particle.vx += dx * 0.0001;
+          particle.vy += dy * 0.0001;
+        }
+
+        // Rebond sur les bords
+        if (particle.x < 0 || particle.x > canvas.width) particle.vx *= -1;
+        if (particle.y < 0 || particle.y > canvas.height) particle.vy *= -1;
+
+        // Dessiner la particule
+        ctx.beginPath();
+        ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(59, 130, 246, ${particle.opacity})`;
+        ctx.fill();
+
+        // Connexions entre particules proches
+        particlesRef.current.slice(index + 1).forEach(otherParticle => {
+          const dx = particle.x - otherParticle.x;
+          const dy = particle.y - otherParticle.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < 100) {
+            ctx.beginPath();
+            ctx.moveTo(particle.x, particle.y);
+            ctx.lineTo(otherParticle.x, otherParticle.y);
+            ctx.strokeStyle = `rgba(147, 51, 234, ${0.2 * (1 - distance / 100)})`;
+            ctx.stroke();
+          }
+        });
+      });
+
+      requestAnimationFrame(animate);
+    };
+
+    resizeCanvas();
+    initParticles();
+    animate();
+
+    window.addEventListener('resize', resizeCanvas);
+    window.addEventListener('mousemove', handleMouseMove);
+
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('mousemove', handleMouseMove);
+    };
   }, []);
 
   return (
-    <div className="fixed inset-0 -z-10 overflow-hidden">
-      {/* Primary gradient background */}
-      <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900" />
-      
-      {/* Animated gradient orbs */}
-      <motion.div
-        className="absolute top-0 left-0 w-96 h-96 rounded-full opacity-20"
-        style={{
-          background: "radial-gradient(circle, #3b82f6 0%, transparent 70%)",
-          x: mousePosition.x * 0.02,
-          y: mousePosition.y * 0.02,
-        }}
-        animate={{
-          scale: [1, 1.2, 1],
-          rotate: [0, 180, 360],
-        }}
-        transition={{
-          duration: 20,
-          repeat: Infinity,
-          ease: "linear",
-        }}
+    <>
+      {/* Canvas pour les particules */}
+      <canvas
+        ref={canvasRef}
+        className="fixed inset-0 w-full h-full -z-10"
+        style={{ background: 'transparent' }}
       />
       
-      <motion.div
-        className="absolute top-1/4 right-0 w-72 h-72 rounded-full opacity-15"
-        style={{
-          background: "radial-gradient(circle, #8b5cf6 0%, transparent 70%)",
-          x: -mousePosition.x * 0.03,
-          y: mousePosition.y * 0.015,
-        }}
-        animate={{
-          scale: [1.2, 1, 1.2],
-          rotate: [360, 180, 0],
-        }}
-        transition={{
-          duration: 25,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-      />
-      
-      <motion.div
-        className="absolute bottom-0 left-1/3 w-80 h-80 rounded-full opacity-10"
-        style={{
-          background: "radial-gradient(circle, #06b6d4 0%, transparent 70%)",
-          x: mousePosition.x * 0.025,
-          y: -mousePosition.y * 0.02,
-        }}
-        animate={{
-          scale: [1, 1.3, 1],
-          rotate: [0, -180, -360],
-        }}
-        transition={{
-          duration: 30,
-          repeat: Infinity,
-          ease: "linear",
-        }}
-      />
-      
-      {/* Floating particles */}
-      {[...Array(50)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="absolute w-1 h-1 bg-white rounded-full opacity-30"
-          style={{
-            left: `${Math.random() * 100}%`,
-            top: `${Math.random() * 100}%`,
-          }}
+      {/* Grille de fond animée */}
+      <div className="fixed inset-0 -z-20 opacity-20">
+        <motion.div 
+          className="absolute inset-0"
           animate={{
-            y: [-20, -100],
-            opacity: [0, 1, 0],
+            backgroundPosition: ['0% 0%', '100% 100%']
           }}
           transition={{
-            duration: Math.random() * 3 + 2,
+            duration: 20,
             repeat: Infinity,
-            delay: Math.random() * 2,
+            repeatType: 'reverse'
+          }}
+          style={{
+            backgroundImage: `
+              linear-gradient(rgba(59, 130, 246, 0.1) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(59, 130, 246, 0.1) 1px, transparent 1px)
+            `,
+            backgroundSize: '50px 50px'
           }}
         />
-      ))}
+      </div>
       
-      {/* Grid pattern overlay */}
-      <div 
-        className="absolute inset-0 opacity-5"
-        style={{
-          backgroundImage: `
-            linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)
-          `,
-          backgroundSize: "50px 50px",
-        }}
-      />
-    </div>
+      {/* Orbes flottantes */}
+      <div className="fixed inset-0 -z-15 overflow-hidden">
+        {[...Array(6)].map((_, i) => (
+          <motion.div
+            key={i}
+            className="absolute rounded-full"
+            animate={{
+              x: [0, 100, 0],
+              y: [0, -100, 0],
+              scale: [1, 1.2, 1],
+              opacity: [0.3, 0.6, 0.3]
+            }}
+            transition={{
+              duration: 10 + i * 2,
+              repeat: Infinity,
+              ease: 'easeInOut'
+            }}
+            style={{
+              width: `${100 + i * 20}px`,
+              height: `${100 + i * 20}px`,
+              left: `${10 + i * 15}%`,
+              top: `${20 + i * 10}%`,
+              background: `radial-gradient(circle, rgba(${i % 2 === 0 ? '59, 130, 246' : '147, 51, 234'}, 0.4) 0%, transparent 70%)`
+            }}
+          />
+        ))}
+      </div>
+    </>
   );
 }

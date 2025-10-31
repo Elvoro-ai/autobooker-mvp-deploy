@@ -1,169 +1,167 @@
 "use client";
 
-import { motion } from "framer-motion";
+import { motion } from 'framer-motion';
 import { 
-  Brain, 
-  Zap, 
-  Shield, 
-  BarChart3, 
-  Clock, 
-  Users, 
-  Calendar, 
-  MessageSquare,
-  Sparkles
-} from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+  MessageCircle, Calendar, Brain, Shield, 
+  BarChart, Globe, Clock, Smartphone, Zap 
+} from 'lucide-react';
 
 const features = [
   {
     icon: Brain,
     title: "IA Conversationnelle Avancée",
-    description: "Assistant IA qui comprend le contexte et gère les rendez-vous 24/7 avec une précision humaine",
-    color: "text-blue-400",
-    gradient: "from-blue-500 to-cyan-500"
+    description: "Comprend le langage naturel, extrait les intentions et gère les créneaux complexes avec une précision de 94%",
+    color: "from-blue-400 to-cyan-400"
   },
   {
-    icon: Zap,
-    title: "Automatisation Intelligente",
-    description: "Workflows automatisés qui s'adaptent aux préférences de vos clients et optimisent votre planning",
-    color: "text-yellow-400",
-    gradient: "from-yellow-500 to-orange-500"
+    icon: Calendar, 
+    title: "Synchronisation Multi-Calendriers",
+    description: "Google Calendar, Outlook, Apple Calendar - synchronisation bidirectionnelle en temps réel avec gestion des conflits",
+    color: "from-green-400 to-emerald-400"
+  },
+  {
+    icon: MessageCircle,
+    title: "Notifications Multi-Canal",
+    description: "Email, SMS, WhatsApp Business - confirmations instantanées et rappels automatiques personnalisés",
+    color: "from-purple-400 to-pink-400"
+  },
+  {
+    icon: BarChart,
+    title: "Analytics Prédictifs",
+    description: "Analyse des patterns de réservation, optimisation des créneaux et prédiction de la demande avec ML",
+    color: "from-orange-400 to-red-400"
   },
   {
     icon: Shield,
     title: "Sécurité Quantique",
-    description: "Chiffrement de niveau militaire et protection des données conforme RGPD avec authentification biométrique",
-    color: "text-green-400",
-    gradient: "from-green-500 to-emerald-500"
+    description: "Chiffrement AES-256, conformité RGPD, audit trails et protection contre les attaques DDoS",
+    color: "from-indigo-400 to-purple-400"
   },
   {
-    icon: BarChart3,
-    title: "Analytics Prédictifs",
-    description: "Machine learning qui prédit les tendances de réservation et optimise votre chiffre d'affaires",
-    color: "text-purple-400",
-    gradient: "from-purple-500 to-pink-500"
+    icon: Globe,
+    title: "Multi-Langues & Fuseaux",
+    description: "15+ langues supportées, gestion automatique des fuseaux horaires et adaptation culturelle",
+    color: "from-teal-400 to-blue-400"
   },
   {
     icon: Clock,
-    title: "Synchronisation Temporelle",
-    description: "Gestion multi-timezone avec API Google Calendar, Outlook et intégration universelle",
-    color: "text-indigo-400",
-    gradient: "from-indigo-500 to-blue-500"
+    title: "Disponibilité 24/7",
+    description: "Infrastructure cloud distribuée, 99.9% uptime, failover automatique et monitoring continu",
+    color: "from-yellow-400 to-orange-400"
   },
   {
-    icon: Users,
-    title: "CRM Intelligent",
-    description: "Profiling client automatique avec historique comportemental et recommandations personnalisées",
-    color: "text-rose-400",
-    gradient: "from-rose-500 to-red-500"
+    icon: Smartphone,
+    title: "API & Intégrations",
+    description: "200+ intégrations, webhooks, API REST complète et SDK pour développeurs avec documentation",
+    color: "from-pink-400 to-rose-400"
   },
   {
-    icon: Calendar,
-    title: "Planification Quantique",
-    description: "Algorithmes de slot optimization qui maximisent l'efficacité et minimisent les créneaux vides",
-    color: "text-teal-400",
-    gradient: "from-teal-500 to-cyan-500"
-  },
-  {
-    icon: MessageSquare,
-    title: "Omnichannel Messaging",
-    description: "WhatsApp, SMS, Email, Slack intégrés avec réponses contextuelles en temps réel",
-    color: "text-amber-400",
-    gradient: "from-amber-500 to-yellow-500"
-  },
-  {
-    icon: Sparkles,
-    title: "Auto-Learning Engine",
-    description: "IA qui apprend continuellement de vos clients pour améliorer l'expérience et les conversions",
-    color: "text-violet-400",
-    gradient: "from-violet-500 to-purple-500"
+    icon: Zap,
+    title: "Performance Ultra-Rapide",
+    description: "Réponse < 2s, optimisation Edge, CDN global et architecture serverless auto-scalante",
+    color: "from-cyan-400 to-blue-400"
   }
 ];
 
-const containerVariants = {
-  hidden: {},
-  visible: {
-    transition: {
-      staggerChildren: 0.1
-    }
-  }
-};
-
-const itemVariants = {
-  hidden: {
-    opacity: 0,
-    y: 50,
-    scale: 0.9
-  },
-  visible: {
-    opacity: 1,
-    y: 0,
-    scale: 1,
-    transition: {
-      duration: 0.6,
-      ease: "easeOut"
-    }
-  }
-};
-
 export function FeatureShowcase() {
   return (
-    <section className="py-24 px-4">
+    <section className="py-24 px-4 relative">
       <div className="container mx-auto max-w-7xl">
+        
+        {/* En-tête de section */}
         <motion.div 
-          className="text-center mb-16"
+          className="text-center mb-20"
           initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
+          whileInView={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8 }}
+          viewport={{ once: true }}
         >
           <h2 className="text-5xl font-bold text-white mb-6">
-            Technologie de <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">Pointe</span>
+            Technologie <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">Révolutionnaire</span>
           </h2>
           <p className="text-xl text-white/80 max-w-3xl mx-auto">
-            Des fonctionnalités IA révolutionnaires qui transforment votre business en machine à conversion
+            9 fonctionnalités IA de pointe qui transforment chaque interaction en opportunité commerciale
           </p>
         </motion.div>
         
-        <motion.div 
-          className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-        >
+        {/* Grille de fonctionnalités */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
           {features.map((feature, index) => {
-            const IconComponent = feature.icon;
+            const Icon = feature.icon;
+            
             return (
               <motion.div
-                key={feature.title}
-                variants={itemVariants}
+                key={index}
+                initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                whileInView={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ 
+                  duration: 0.6, 
+                  delay: index * 0.1,
+                  ease: "easeOut"
+                }}
+                viewport={{ once: true }}
                 whileHover={{ 
-                  scale: 1.05, 
+                  y: -8, 
+                  scale: 1.02,
                   transition: { duration: 0.2 }
                 }}
                 className="group"
               >
-                <Card className="h-full hover:shadow-2xl transition-all duration-300 border-white/20 hover:border-white/40 bg-white/5 backdrop-blur-md">
-                  <CardHeader className="text-center pb-4">
-                    <motion.div 
-                      className={`w-16 h-16 mx-auto mb-4 rounded-2xl bg-gradient-to-br ${feature.gradient} p-3 shadow-xl`}
-                      whileHover={{ rotate: 360 }}
-                      transition={{ duration: 0.6 }}
-                    >
-                      <IconComponent className="w-full h-full text-white" />
-                    </motion.div>
-                    <CardTitle className="text-xl font-bold text-white group-hover:text-transparent group-hover:bg-gradient-to-r group-hover:from-blue-400 group-hover:to-purple-400 group-hover:bg-clip-text transition-all duration-300">
-                      {feature.title}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <CardDescription className="text-white/70 text-center leading-relaxed">
-                      {feature.description}
-                    </CardDescription>
-                  </CardContent>
-                </Card>
+                <div className="h-full bg-gradient-to-br from-white/10 to-white/5 backdrop-blur-xl border border-white/20 rounded-2xl p-8 hover:border-white/40 transition-all duration-300">
+                  
+                  {/* Icône avec gradient */}
+                  <div className={`w-16 h-16 rounded-xl bg-gradient-to-r ${feature.color} p-4 mb-6 group-hover:scale-110 transition-transform duration-300`}>
+                    <Icon className="w-full h-full text-white" />
+                  </div>
+                  
+                  {/* Contenu */}
+                  <h3 className="text-xl font-bold text-white mb-4 group-hover:text-blue-400 transition-colors">
+                    {feature.title}
+                  </h3>
+                  
+                  <p className="text-white/70 leading-relaxed">
+                    {feature.description}
+                  </p>
+                </div>
               </motion.div>
             );
           })}
+        </div>
+        
+        {/* Stats impressionnants */}
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.3 }}
+          viewport={{ once: true }}
+          className="mt-20 text-center"
+        >
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-8 max-w-4xl mx-auto">
+            <div>
+              <div className="text-4xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent mb-2">
+                50K+
+              </div>
+              <div className="text-white/60">RDV/mois traités</div>
+            </div>
+            <div>
+              <div className="text-4xl font-bold bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent mb-2">
+                94%
+              </div>
+              <div className="text-white/60">Taux de conversion</div>
+            </div>
+            <div>
+              <div className="text-4xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent mb-2">
+                &lt;2s
+              </div>
+              <div className="text-white/60">Temps de réponse</div>
+            </div>
+            <div>
+              <div className="text-4xl font-bold bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent mb-2">
+                99.9%
+              </div>
+              <div className="text-white/60">Disponibilité</div>
+            </div>
+          </div>
         </motion.div>
       </div>
     </section>
