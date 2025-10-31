@@ -1,0 +1,78 @@
+name: Performance Monitoring
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Toutes les 6 heures
+  workflow_dispatch:
+
+jobs:
+  lighthouse-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Audit URLs using Lighthouse CI
+        uses: treosh/lighthouse-ci-action@v10
+        with:
+          urls: |
+            https://autobooker-mvp-deploy.vercel.app
+          configPath: './lighthouse.config.js'
+          uploadArtifacts: true
+          temporaryPublicStorage: true
+
+  load-testing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick Load Test
+        run: |
+          echo "🚀 Lancement test de charge automatique"
+          
+          response=$(curl -s -X GET "https://autobooker-mvp-deploy.vercel.app/api/test?type=realistic_user_simulation&quick=true" \
+            -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_KEY }}" || echo 'TEST_FAILED')
+          
+          if [[ "$response" == *"TEST_FAILED"* ]]; then
+            echo "❌ Test de charge échoué"
+            exit 1
+          fi
+          
+          echo "✅ Test de charge terminé"
+          echo "$response" | head -20
+
+  security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Security Penetration Test
+        run: |
+          echo "🔒 Test de sécurité automatique"
+          
+          response=$(curl -s -X GET "https://autobooker-mvp-deploy.vercel.app/api/test?type=security_penetration_test&quick=true" \
+            -H "Authorization: Bearer ${{ secrets.LOAD_TEST_API_KEY }}" || echo 'SECURITY_TEST_FAILED')
+          
+          if [[ "$response" == *"SECURITY_TEST_FAILED"* ]]; then
+            echo "❌ Test de sécurité échoué"
+            exit 1
+          fi
+          
+          echo "✅ Tests de sécurité terminés"
+          echo "$response" | head -20
+
+  health-monitoring:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Health Check
+        run: |
+          echo "🏥 Vérification santé système"
+          
+          health=$(curl -s https://autobooker-mvp-deploy.vercel.app/api/health || echo '{"status":"error"}')
+          status=$(echo "$health" | grep -o '"status":"[^"]*"' | cut -d'"' -f4)
+          
+          echo "Status: $status"
+          
+          if [ "$status" == "critical" ]; then
+            echo "❌ Système en état critique!"
+            exit 1
+          elif [ "$status" == "degraded" ]; then
+            echo "⚠️ Système dégradé"
+          else
+            echo "✅ Système en bonne santé"
+          fi
