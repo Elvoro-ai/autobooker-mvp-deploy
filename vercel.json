@@ -1,0 +1,135 @@
+{
+  "version": 2,
+  "name": "autobooker-ai",
+  "alias": ["autobooker.ai", "app.autobooker.ai"],
+  
+  "build": {
+    "env": {
+      "NEXT_PUBLIC_BASE_URL": "https://autobooker-mvp-deploy.vercel.app",
+      "NODE_ENV": "production"
+    }
+  },
+  
+  "env": {
+    "NODE_ENV": "production",
+    "NEXT_PUBLIC_APP_VERSION": "2.0.0",
+    "NEXT_PUBLIC_BUILD_TIME": "@vercel-build-time"
+  },
+  
+  "functions": {
+    "app/api/ai/route.ts": {
+      "maxDuration": 30,
+      "memory": 1024,
+      "runtime": "nodejs18.x"
+    },
+    "app/api/health/route.ts": {
+      "maxDuration": 15,
+      "memory": 512,
+      "runtime": "nodejs18.x"
+    },
+    "app/api/test/route.ts": {
+      "maxDuration": 300,
+      "memory": 2048,
+      "runtime": "nodejs18.x"
+    }
+  },
+  
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "X-XSS-Protection",
+          "value": "1; mode=block"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "strict-origin-when-cross-origin"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=()"
+        }
+      ]
+    },
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-cache, no-store, must-revalidate"
+        },
+        {
+          "key": "X-API-Version",
+          "value": "2.0.0"
+        }
+      ]
+    },
+    {
+      "source": "/_next/static/(.*)",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=31536000, immutable"
+        }
+      ]
+    }
+  ],
+  
+  "redirects": [
+    {
+      "source": "/demo",
+      "destination": "/#demo",
+      "permanent": true
+    },
+    {
+      "source": "/test",
+      "destination": "/api/health",
+      "permanent": false
+    }
+  ],
+  
+  "rewrites": [
+    {
+      "source": "/health",
+      "destination": "/api/health"
+    },
+    {
+      "source": "/status",
+      "destination": "/api/health"
+    }
+  ],
+  
+  "regions": ["fra1", "iad1", "sfo1"],
+  
+  "crons": [
+    {
+      "path": "/api/cron/cleanup",
+      "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/cron/health-check",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  
+  "github": {
+    "silent": false,
+    "autoAlias": true,
+    "autoJobCancelation": true
+  },
+  
+  "buildCommand": "npm run build",
+  "installCommand": "npm install --production=false",
+  "outputDirectory": ".next",
+  
+  "framework": "nextjs"
+}
