@@ -1,12 +1,27 @@
 {
   "name": "autobooker-ai-mvp",
   "version": "2.0.0",
+  "description": "Assistant IA conversationnel pour automatiser les réservations 24/7",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "lint:fix": "next lint --fix",
+    "type-check": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:ci": "jest --ci --coverage --watchAll=false",
+    "clean": "rm -rf .next dist coverage",
+    "analyze": "ANALYZE=true npm run build",
+    "health-check": "curl -f https://autobooker-mvp-deploy.vercel.app/api/health || exit 1",
+    "deploy": "vercel --prod",
+    "preview": "vercel",
+    "env:pull": "vercel env pull .env.local",
+    "env:push": "vercel env push .env.local",
+    "load-test": "node -e \"fetch('https://autobooker-mvp-deploy.vercel.app/api/test?type=massive_load_test&quick=true').then(r=>r.json()).then(console.log)\"",
+    "security-test": "node -e \"fetch('https://autobooker-mvp-deploy.vercel.app/api/test?type=security_penetration_test&quick=true').then(r=>r.json()).then(console.log)\""
   },
   "dependencies": {
     "next": "14.2.5",
@@ -26,17 +41,45 @@
     "@hookform/resolvers": "^3.9.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^2.5.3",
-    "class-variance-authority": "^0.7.0"
+    "class-variance-authority": "^0.7.0",
+    "@vercel/analytics": "^1.1.1",
+    "@vercel/speed-insights": "^1.0.2"
   },
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@next/bundle-analyzer": "^14.0.3",
     "autoprefixer": "^10.4.20",
     "eslint": "^8",
     "eslint-config-next": "14.2.5",
+    "eslint-config-prettier": "^9.0.0",
     "postcss": "^8",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
-  }
+    "typescript": "^5",
+    "prettier": "^3.1.0"
+  },
+  "engines": {
+    "node": ">=18.17.0",
+    "npm": ">=9.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Elvoro-ai/autobooker-mvp-deploy.git"
+  },
+  "keywords": [
+    "ai",
+    "booking",
+    "reservation",
+    "chatbot",
+    "calendar",
+    "automation",
+    "saas",
+    "nextjs",
+    "typescript",
+    "enterprise"
+  ],
+  "author": "AutoBooker AI",
+  "license": "MIT",
+  "homepage": "https://autobooker-mvp-deploy.vercel.app"
 }
