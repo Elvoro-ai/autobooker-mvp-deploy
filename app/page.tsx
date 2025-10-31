@@ -3,7 +3,7 @@
 import { AnimatedBackground } from "@/components/animated-background";
 import { HeroSection } from "@/components/hero-section";
 import { FeatureShowcase } from "@/components/feature-showcase";
-import { DemoSection } from "@/components/demo-section";
+import { LiveAIChat } from "@/components/live-ai-chat";
 import { SocialProof } from "@/components/social-proof";
 import { PricingSection } from "@/components/pricing-section";
 import { motion } from "framer-motion";
@@ -37,8 +37,8 @@ export default function Home() {
         {/* Hero Section */}
         <HeroSection />
         
-        {/* AI Demo Section */}
-        <DemoSection />
+        {/* Live AI Chat - Real functionality */}
+        <LiveAIChat />
         
         {/* Feature Showcase */}
         <FeatureShowcase />
